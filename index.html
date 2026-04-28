@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Realtime RAM / CPU Monitor</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff;
+        --fg: #111111;
+        --soft: #f5f5f5;
+        --line: #e0e0e0;
+        --muted: #666666;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 16px;
+      }
+
+      .wrap {
+        width: min(920px, 100%);
+        margin: 0 auto;
+        display: grid;
+        gap: 14px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--soft);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: clamp(1.2rem, 4vw, 1.8rem);
+      }
+
+      h2 { margin: 0 0 10px; font-size: 1.05rem; }
+
+      .muted { color: var(--muted); font-size: 0.9rem; }
+
+      .grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+
+      .stat {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+      }
+
+      .label { font-size: 0.82rem; color: var(--muted); }
+      .value { font-size: 1.1rem; font-weight: 700; margin-top: 4px; }
+
+      .tables {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr;
+      }
+
+      @media (min-width: 860px) {
+        .tables { grid-template-columns: 1fr 1fr; }
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      th, td {
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+        padding: 8px;
+        font-size: 0.86rem;
+      }
+
+      th { background: #fafafa; font-weight: 700; }
+      tr:last-child td { border-bottom: none; }
+      .right { text-align: right; }
+      .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="card">
+        <h1>📊 RAM / CPU Realtime Monitor</h1>
+        <div id="updated" class="muted">กำลังเชื่อมต่อ...</div>
+      </section>
+
+      <section class="card">
+        <h2>ภาพรวมระบบ</h2>
+        <div class="grid">
+          <div class="stat"><div class="label">RAM Usage</div><div id="ramUsage" class="value mono">-- %</div></div>
+          <div class="stat"><div class="label">CPU Usage</div><div id="cpuUsage" class="value mono">-- %</div></div>
+          <div class="stat"><div class="label">RAM Used</div><div id="ramUsed" class="value mono">-- GB</div></div>
+          <div class="stat"><div class="label">RAM Free</div><div id="ramFree" class="value mono">-- GB</div></div>
+          <div class="stat"><div class="label">RAM Total</div><div id="ramTotal" class="value mono">-- GB</div></div>
+          <div class="stat"><div class="label">RAM ขาด/ใช้ไป</div><div id="ramShortfall" class="value mono">-- GB</div></div>
+        </div>
+      </section>
+
+      <section class="tables">
+        <article class="card">
+          <h2>โปรเซสที่ใช้ RAM สูงสุด</h2>
+          <table>
+            <thead>
+              <tr><th>PID</th><th>ชื่อ</th><th class="right">RAM %</th><th class="right">CPU %</th></tr>
+            </thead>
+            <tbody id="memRows"></tbody>
+          </table>
+        </article>
+
+        <article class="card">
+          <h2>โปรเซสที่ใช้ CPU สูงสุด</h2>
+          <table>
+            <thead>
+              <tr><th>PID</th><th>ชื่อ</th><th class="right">CPU %</th><th class="right">RAM %</th></tr>
+            </thead>
+            <tbody id="cpuRows"></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function rowTemplate(items, primary) {
+        if (!items.length) {
+          return `<tr><td colspan="4" class="muted">ไม่พบข้อมูลโปรเซส</td></tr>`;
+        }
+
+        return items.map((p) => {
+          if (primary === 'mem') {
+            return `<tr>
+              <td class="mono">${p.pid}</td>
+              <td>${p.name}</td>
+              <td class="right mono">${p.memPercent.toFixed(2)}%</td>
+              <td class="right mono">${p.cpuPercent.toFixed(2)}%</td>
+            </tr>`;
+          }
+
+          return `<tr>
+            <td class="mono">${p.pid}</td>
+            <td>${p.name}</td>
+            <td class="right mono">${p.cpuPercent.toFixed(2)}%</td>
+            <td class="right mono">${p.memPercent.toFixed(2)}%</td>
+          </tr>`;
+        }).join('');
+      }
+
+      const source = new EventSource('/events');
+
+      source.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        $('updated').textContent = `อัปเดตล่าสุด: ${new Date(data.time).toLocaleString('th-TH')}`;
+        $('ramUsage').textContent = `${data.ram.usagePercent.toFixed(2)} %`;
+        $('cpuUsage').textContent = `${data.cpu.usagePercent.toFixed(2)} %`;
+        $('ramUsed').textContent = `${data.ram.usedGb.toFixed(2)} GB`;
+        $('ramFree').textContent = `${data.ram.freeGb.toFixed(2)} GB`;
+        $('ramTotal').textContent = `${data.ram.totalGb.toFixed(2)} GB`;
+        $('ramShortfall').textContent = `${data.ram.shortfallGb.toFixed(2)} GB`;
+
+        $('memRows').innerHTML = rowTemplate(data.processes.memoryTop, 'mem');
+        $('cpuRows').innerHTML = rowTemplate(data.processes.cpuTop, 'cpu');
+      };
+
+      source.onerror = () => {
+        $('updated').textContent = 'การเชื่อมต่อหลุด กำลังพยายามเชื่อมต่อใหม่...';
+      };
+    </script>
+  </body>
+</html>
