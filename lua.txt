@@ -1,1 +1,434 @@
 
+--[[
+    ✨ AUTO LUA - ROBLOX EXECUTOR SCRIPT ✨
+    🚀 Features:
+      - Save Initial Position & Auto-Walk Back (Continuous)
+      - Adjustable Countdown Timer via UI
+      - Auto Equip (paused during walk, resume after)
+      - Auto Reset 5 Times (2.7s delay) after timer ends
+      - Discord Webhook Notification (no username)
+      - Draggable UI with timer settings
+]]
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local WebhookURL = "https://discord.com/api/webhooks/1498296786555764877/1P5wMOA_Rxt0hDLkWL4iFl6BlohN5qqcWrWfEw5GP90isoh-q_0_ZrHldO9tFS9BgCbi"
+
+local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+
+-- ตัวแปรควบคุม
+local isResetting = false
+local isWalking = false
+local cycleCount = 0
+local timerMinutes = 19
+local countdownTime = timerMinutes * 60
+
+local savedPosition = nil
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HRP = Character:WaitForChild("HumanoidRootPart", 5)
+if HRP then
+    savedPosition = HRP.Position
+    print("📍 Saved Initial Position:", savedPosition)
+end
+
+---------------------------------------------------------
+-- 🎨 UI Construction
+---------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoLuaUI"
+ScreenGui.ResetOnSpawn = false
+if not pcall(function() ScreenGui.Parent = CoreGui end) then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 240, 0, 200)
+MainFrame.Position = UDim2.new(0.5, -120, 0, 20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
+
+-- Gradient background
+local UIGradient = Instance.new("UIGradient")
+UIGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 28)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 18))
+})
+UIGradient.Rotation = 135
+UIGradient.Parent = MainFrame
+
+-- Top accent bar
+local AccentBar = Instance.new("Frame")
+AccentBar.Size = UDim2.new(1, 0, 0, 3)
+AccentBar.Position = UDim2.new(0, 0, 0, 0)
+AccentBar.BackgroundColor3 = Color3.fromRGB(0, 200, 120)
+AccentBar.BorderSizePixel = 0
+AccentBar.Parent = MainFrame
+
+local AccentGrad = Instance.new("UIGradient")
+AccentGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 200, 120)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 150, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 0, 255))
+})
+AccentGrad.Parent = AccentBar
+
+-- Title
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -10, 0, 30)
+TitleLabel.Position = UDim2.new(0, 10, 0, 8)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "✨ AUTO LUA"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 14
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = MainFrame
+
+-- Status dot
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.new(0, 8, 0, 8)
+StatusDot.Position = UDim2.new(1, -20, 0, 14)
+StatusDot.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+StatusDot.BorderSizePixel = 0
+StatusDot.Parent = MainFrame
+Instance.new("UICorner", StatusDot).CornerRadius = UDim.new(1, 0)
+
+-- Divider
+local Divider = Instance.new("Frame")
+Divider.Size = UDim2.new(1, -20, 0, 1)
+Divider.Position = UDim2.new(0, 10, 0, 40)
+Divider.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+Divider.BorderSizePixel = 0
+Divider.Parent = MainFrame
+
+-- Timer Display
+local TimerLabelUI = Instance.new("TextLabel")
+TimerLabelUI.Size = UDim2.new(1, 0, 0, 45)
+TimerLabelUI.Position = UDim2.new(0, 0, 0, 45)
+TimerLabelUI.BackgroundTransparency = 1
+TimerLabelUI.Font = Enum.Font.GothamBold
+TimerLabelUI.Text = "19:00"
+TimerLabelUI.TextColor3 = Color3.fromRGB(0, 255, 150)
+TimerLabelUI.TextSize = 32
+TimerLabelUI.Parent = MainFrame
+
+-- Status Label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, 0, 0, 18)
+StatusLabel.Position = UDim2.new(0, 0, 0, 90)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.Text = "⚡ Running  •  Cycle: 0"
+StatusLabel.TextColor3 = Color3.fromRGB(140, 140, 160)
+StatusLabel.TextSize = 11
+StatusLabel.Parent = MainFrame
+
+-- Divider 2
+local Divider2 = Instance.new("Frame")
+Divider2.Size = UDim2.new(1, -20, 0, 1)
+Divider2.Position = UDim2.new(0, 10, 0, 114)
+Divider2.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+Divider2.BorderSizePixel = 0
+Divider2.Parent = MainFrame
+
+-- Set Timer Label
+local SetTimerLabel = Instance.new("TextLabel")
+SetTimerLabel.Size = UDim2.new(1, 0, 0, 16)
+SetTimerLabel.Position = UDim2.new(0, 0, 0, 120)
+SetTimerLabel.BackgroundTransparency = 1
+SetTimerLabel.Font = Enum.Font.Gotham
+SetTimerLabel.Text = "⏱ Set Timer (minutes)"
+SetTimerLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+SetTimerLabel.TextSize = 11
+SetTimerLabel.Parent = MainFrame
+
+-- Timer Controls Row
+local ControlRow = Instance.new("Frame")
+ControlRow.Size = UDim2.new(1, -20, 0, 34)
+ControlRow.Position = UDim2.new(0, 10, 0, 140)
+ControlRow.BackgroundTransparency = 1
+ControlRow.Parent = MainFrame
+
+-- Minus Button
+local MinusBtn = Instance.new("TextButton")
+MinusBtn.Size = UDim2.new(0, 34, 0, 34)
+MinusBtn.Position = UDim2.new(0, 0, 0, 0)
+MinusBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+MinusBtn.Font = Enum.Font.GothamBold
+MinusBtn.Text = "−"
+MinusBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+MinusBtn.TextSize = 18
+MinusBtn.BorderSizePixel = 0
+MinusBtn.Parent = ControlRow
+Instance.new("UICorner", MinusBtn).CornerRadius = UDim.new(0, 8)
+
+-- Minutes Input
+local MinutesInput = Instance.new("TextBox")
+MinutesInput.Size = UDim2.new(1, -80, 0, 34)
+MinutesInput.Position = UDim2.new(0, 42, 0, 0)
+MinutesInput.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
+MinutesInput.Font = Enum.Font.GothamBold
+MinutesInput.Text = "19"
+MinutesInput.TextColor3 = Color3.fromRGB(0, 200, 255)
+MinutesInput.TextSize = 16
+MinutesInput.BorderSizePixel = 0
+MinutesInput.ClearTextOnFocus = false
+MinutesInput.Parent = ControlRow
+Instance.new("UICorner", MinutesInput).CornerRadius = UDim.new(0, 8)
+
+-- Plus Button
+local PlusBtn = Instance.new("TextButton")
+PlusBtn.Size = UDim2.new(0, 34, 0, 34)
+PlusBtn.Position = UDim2.new(1, -34, 0, 0)
+PlusBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+PlusBtn.Font = Enum.Font.GothamBold
+PlusBtn.Text = "+"
+PlusBtn.TextColor3 = Color3.fromRGB(0, 255, 150)
+PlusBtn.TextSize = 18
+PlusBtn.BorderSizePixel = 0
+PlusBtn.Parent = ControlRow
+Instance.new("UICorner", PlusBtn).CornerRadius = UDim.new(0, 8)
+
+-- Apply Button
+local ApplyBtn = Instance.new("TextButton")
+ApplyBtn.Size = UDim2.new(1, -20, 0, 28)
+ApplyBtn.Position = UDim2.new(0, 10, 0, 182)
+ApplyBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 80)
+ApplyBtn.Font = Enum.Font.GothamBold
+ApplyBtn.Text = "✓ Apply Timer"
+ApplyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ApplyBtn.TextSize = 13
+ApplyBtn.BorderSizePixel = 0
+ApplyBtn.Parent = MainFrame
+Instance.new("UICorner", ApplyBtn).CornerRadius = UDim.new(0, 8)
+
+-- Resize MainFrame to fit
+MainFrame.Size = UDim2.new(0, 240, 0, 220)
+
+---------------------------------------------------------
+-- 🖱 Draggable UI
+---------------------------------------------------------
+local dragging, dragInput, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+---------------------------------------------------------
+-- ⚙️ Timer Controls Logic
+---------------------------------------------------------
+local function applyNewTimer()
+    local val = tonumber(MinutesInput.Text)
+    if val and val >= 1 and val <= 999 then
+        timerMinutes = val
+        countdownTime = timerMinutes * 60
+        local mins = math.floor(countdownTime / 60)
+        local secs = countdownTime % 60
+        TimerLabelUI.Text = string.format("%02d:%02d", mins, secs)
+        TimerLabelUI.TextColor3 = Color3.fromRGB(0, 255, 150)
+        print("⏱ Timer set to", timerMinutes, "minutes")
+    else
+        MinutesInput.Text = tostring(timerMinutes)
+    end
+end
+
+MinusBtn.MouseButton1Click:Connect(function()
+    local val = tonumber(MinutesInput.Text) or timerMinutes
+    val = math.max(1, val - 1)
+    MinutesInput.Text = tostring(val)
+end)
+
+PlusBtn.MouseButton1Click:Connect(function()
+    local val = tonumber(MinutesInput.Text) or timerMinutes
+    val = math.min(999, val + 1)
+    MinutesInput.Text = tostring(val)
+end)
+
+ApplyBtn.MouseButton1Click:Connect(function()
+    if not isResetting then
+        applyNewTimer()
+        -- Flash feedback
+        ApplyBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+        task.delay(0.3, function()
+            ApplyBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 80)
+        end)
+    end
+end)
+
+MinutesInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed then applyNewTimer() end
+end)
+
+---------------------------------------------------------
+-- ⚙️ Core Functions
+---------------------------------------------------------
+
+-- อัปเดต UI Status
+local function updateStatus(text, color)
+    StatusLabel.Text = text
+    if color then StatusLabel.TextColor3 = color end
+end
+
+-- ถอด Tool ชั่วคราว
+local function unequipTool(char)
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then hum:UnequipTools() end
+end
+
+-- สวมใส่ Tool
+local function autoEquip(char)
+    if not char then return end
+    local Humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not Humanoid or Humanoid.Health <= 0 then return end
+    if not char:FindFirstChildOfClass("Tool") then
+        local Backpack = LocalPlayer:FindFirstChild("Backpack")
+        if Backpack then
+            local targetTool = Backpack:FindFirstChild("Ice Queen") or Backpack:FindFirstChildOfClass("Tool")
+            if targetTool then Humanoid:EquipTool(targetTool) end
+        end
+    end
+end
+
+-- เดินกลับจุดเริ่ม (ถอด Tool ขณะเดิน, ถือคืนเมื่อถึง)
+local function autoReturn(char)
+    if not char or not savedPosition then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
+
+    local distance = (hrp.Position - savedPosition).Magnitude
+    if distance > 5 then
+        if not isWalking then
+            isWalking = true
+            pcall(unequipTool, char)
+            updateStatus("🚶 Walking to spawn...", Color3.fromRGB(255, 200, 50))
+        end
+        hum:MoveTo(savedPosition)
+    else
+        if isWalking then
+            isWalking = false
+            updateStatus("⚡ Running  •  Cycle: " .. cycleCount, Color3.fromRGB(140, 140, 160))
+            -- ถึงจุดแล้ว เริ่ม equip ใหม่
+            task.spawn(function()
+                task.wait(0.3)
+                pcall(autoEquip, LocalPlayer.Character)
+            end)
+        end
+    end
+end
+
+-- รีเซ็ต 5 ครั้ง + Webhook (ไม่บอกชื่อผู้ใช้)
+local function triggerResets()
+    isResetting = true
+    TimerLabelUI.TextColor3 = Color3.fromRGB(255, 80, 80)
+    TimerLabelUI.Text = "RESET"
+    StatusDot.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    updateStatus("💀 Resetting (5x)...", Color3.fromRGB(255, 80, 80))
+
+    pcall(unequipTool, LocalPlayer.Character)
+
+    for i = 1, 5 do
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hum = char:WaitForChild("Humanoid", 5)
+        if hum then hum.Health = 0 end
+        LocalPlayer.CharacterAdded:Wait()
+        task.wait(2.7)
+    end
+
+    cycleCount = cycleCount + 1
+
+    -- Webhook ไม่มีชื่อผู้ใช้
+    if requestFunc then
+        local message = string.format(
+            "✅ **[AUTO LUA]** Reset 5 ครั้ง สำเร็จ! (รอบที่ %d) • Timer: %d นาที",
+            cycleCount, timerMinutes
+        )
+        pcall(function()
+            requestFunc({
+                Url = WebhookURL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({ ["content"] = message })
+            })
+        end)
+    end
+
+    -- รีเซ็ตค่า
+    TimerLabelUI.TextColor3 = Color3.fromRGB(0, 255, 150)
+    StatusDot.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+    countdownTime = timerMinutes * 60
+    isWalking = false
+    isResetting = false
+    updateStatus("⚡ Running  •  Cycle: " .. cycleCount, Color3.fromRGB(140, 140, 160))
+end
+
+---------------------------------------------------------
+-- 🔄 Main Loops
+---------------------------------------------------------
+
+-- Loop: Equip & Walk (0.5s)
+task.spawn(function()
+    while task.wait(0.5) do
+        if not isResetting then
+            local char = LocalPlayer.Character
+            pcall(autoReturn, char)
+            -- Equip เฉพาะเมื่อไม่ได้กำลังเดิน
+            if not isWalking then
+                pcall(autoEquip, char)
+            end
+        end
+    end
+end)
+
+-- Loop: Countdown (1s)
+task.spawn(function()
+    while task.wait(1) do
+        if not isResetting then
+            countdownTime = math.max(0, countdownTime - 1)
+            local mins = math.floor(countdownTime / 60)
+            local secs = countdownTime % 60
+            TimerLabelUI.Text = string.format("%02d:%02d", mins, secs)
+
+            -- เปลี่ยนสีเมื่อใกล้หมดเวลา
+            if countdownTime <= 60 then
+                TimerLabelUI.TextColor3 = Color3.fromRGB(255, 120, 50)
+            elseif countdownTime <= 180 then
+                TimerLabelUI.TextColor3 = Color3.fromRGB(255, 220, 0)
+            else
+                TimerLabelUI.TextColor3 = Color3.fromRGB(0, 255, 150)
+            end
+
+            if countdownTime <= 0 then
+                task.spawn(triggerResets)
+            end
+        end
+    end
+end)
+
+print("✅ AUTO LUA loaded! UI ready.")
