@@ -73,8 +73,8 @@
     .app {
       display: grid;
       grid-template-columns: 260px 1fr;
-      grid-template-rows: 100vh;
-      height: 100vh;
+      grid-template-rows: var(--app-height, 100dvh);
+      height: var(--app-height, 100dvh);
       position: relative;
     }
 
@@ -302,7 +302,7 @@
     .main {
       display: flex;
       flex-direction: column;
-      height: 100vh;
+      height: var(--app-height, 100dvh);
       overflow: hidden;
       position: relative;
     }
@@ -679,8 +679,10 @@
     .input-area {
       border-top: 1px solid var(--border);
       background: var(--bg);
-      padding: 14px 24px;
+      padding: 14px 24px calc(14px + env(safe-area-inset-bottom));
       flex-shrink: 0;
+      position: sticky;
+      bottom: 0;
     }
 
     .attached-file {
@@ -1011,7 +1013,7 @@
         top: 0;
         left: 0;
         width: 280px;
-        height: 100vh;
+        height: var(--app-height, 100dvh);
         z-index: 50;
         transform: translateX(-100%);
         box-shadow: none;
@@ -1073,7 +1075,7 @@
       }
 
       .input-area {
-        padding: 10px 12px;
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
       }
 
       .input-row {
@@ -1339,11 +1341,10 @@
     document.body.style.overflow = "";
   }
 
-  // Auto-close sidebar when clicking a field or new chat on mobile
-  document.querySelectorAll('.field-input, .new-chat-btn').forEach(el => {
-    el.addEventListener('focus', () => {
-      if (window.innerWidth <= 768) closeSidebar();
-    });
+  // Keep sidebar open while editing settings on mobile.
+  // Close it only after the user taps New Chat.
+  document.querySelector('.new-chat-btn').addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeSidebar();
   });
 
   // Handle window resize
@@ -1352,6 +1353,19 @@
       closeSidebar();
     }
   });
+
+
+  function syncAppHeight() {
+    const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    document.documentElement.style.setProperty("--app-height", `${Math.round(vh)}px`);
+  }
+
+  syncAppHeight();
+  window.addEventListener("resize", syncAppHeight);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", syncAppHeight);
+    window.visualViewport.addEventListener("scroll", syncAppHeight);
+  }
 
   // ── UI helpers ──
   function setStatus(state, text) {
